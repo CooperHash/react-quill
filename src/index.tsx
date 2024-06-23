@@ -7,14 +7,9 @@ import React from 'react';
 import ReactDOM from 'react-dom';
 import isEqual from 'lodash/isEqual';
 
-import Quill, {
-  QuillOptionsStatic,
-  DeltaStatic,
-  RangeStatic,
-  BoundsStatic,
-  StringMap,
-  Sources,
-} from 'quill';
+import Quill, { QuillOptions as QuillOptionsStatic } from 'quill';
+import type { EmitterSource as Sources, Range as RangeStatic } from 'quill'
+import type DeltaStatic from 'quill-delta';
 
 // Merged namespace hack to export types along with default object
 // See: https://github.com/Microsoft/TypeScript/issues/2719
@@ -23,6 +18,8 @@ namespace ReactQuill {
   export type Range = RangeStatic | null;
 
   export interface QuillOptions extends QuillOptionsStatic {
+    scrollingContainer?: HTMLElement | string | undefined,
+    strict?: boolean | undefined,
     tabIndex?: number,
   }
 
@@ -30,10 +27,11 @@ namespace ReactQuill {
     bounds?: string | HTMLElement,
     children?: React.ReactElement<any>,
     className?: string,
+    ref?: React.LegacyRef<ReactQuill>,
     defaultValue?: Value,
     formats?: string[],
     id?: string,
-    modules?: StringMap,
+    modules?: QuillOptions['modules'],
     onChange?(
       value: string,
       delta: DeltaStatic,
@@ -69,12 +67,12 @@ namespace ReactQuill {
   }
 
   export interface UnprivilegedEditor {
-    getLength(): number;
-    getText(index?: number, length?: number): string;
-    getHTML(): string;
-    getBounds(index: number, length?: number): BoundsStatic;
-    getSelection(focus?: boolean): RangeStatic;
-    getContents(index?: number, length?: number): DeltaStatic;
+    getLength: Quill['getLength'];
+    getText: Quill['getText'];
+    getHTML: Quill['getSemanticHTML'];
+    getBounds: Quill['getBounds'];
+    getSelection: Quill['getSelection'];
+    getContents: Quill['getContents'];
   }
 }
 
@@ -180,7 +178,7 @@ class ReactQuill extends React.Component<ReactQuillProps, ReactQuillState> {
 
   constructor(props: ReactQuillProps) {
     super(props);
-    const value = this.isControlled()? props.value : props.defaultValue;
+    const value = this.isControlled() ? props.value : props.defaultValue;
     this.value = value ?? '';
   }
 
@@ -266,15 +264,15 @@ class ReactQuill extends React.Component<ReactQuillProps, ReactQuillState> {
     if (this.editor && this.shouldComponentRegenerate(prevProps)) {
       const delta = this.editor.getContents();
       const selection = this.editor.getSelection();
-      this.regenerationSnapshot = {delta, selection};
-      this.setState({generation: this.state.generation + 1});
+      this.regenerationSnapshot = { delta, selection };
+      this.setState({ generation: this.state.generation + 1 });
       this.destroyEditor();
     }
 
     // The component has been regenerated, so it must be re-instantiated, and
     // its content must be restored to the previous values from the snapshot.
     if (this.state.generation !== prevState.generation) {
-      const {delta, selection} = this.regenerationSnapshot!;
+      const { delta, selection } = this.regenerationSnapshot!;
       delete this.regenerationSnapshot;
       this.instantiateEditor();
       const editor = this.editor!;
@@ -328,7 +326,7 @@ class ReactQuill extends React.Component<ReactQuillProps, ReactQuillState> {
   Creates an editor on the given element. The editor will be passed the
   configuration, have its events bound,
   */
-  createEditor(element: Element, config: QuillOptions) {
+  createEditor(element: HTMLElement, config: QuillOptions) {
     const editor = new Quill(element, config);
     if (config.tabIndex != null) {
       this.setEditorTabIndex(editor, config.tabIndex);
@@ -384,7 +382,7 @@ class ReactQuill extends React.Component<ReactQuillProps, ReactQuillState> {
     this.value = value;
     const sel = this.getEditorSelection();
     if (typeof value === 'string') {
-      editor.setContents(editor.clipboard.convert(value));
+      editor.setContents(editor.clipboard.convert({ html: value }));
     } else {
       editor.setContents(value);
     }
@@ -396,8 +394,8 @@ class ReactQuill extends React.Component<ReactQuillProps, ReactQuillState> {
     if (range) {
       // Validate bounds before applying.
       const length = editor.getLength();
-      range.index = Math.max(0, Math.min(range.index, length-1));
-      range.length = Math.max(0, Math.min(range.length, (length-1) - range.index));
+      range.index = Math.max(0, Math.min(range.index, length - 1));
+      range.length = Math.max(0, Math.min(range.length, (length - 1) - range.index));
       editor.setSelection(range);
     }
   }
@@ -423,16 +421,16 @@ class ReactQuill extends React.Component<ReactQuillProps, ReactQuillState> {
   makeUnprivilegedEditor(editor: Quill) {
     const e = editor;
     return {
-      getHTML:      () => e.root.innerHTML,
-      getLength:    e.getLength.bind(e),
-      getText:      e.getText.bind(e),
-      getContents:  e.getContents.bind(e),
+      getHTML: () => e.root.innerHTML,
+      getLength: e.getLength.bind(e),
+      getText: e.getText.bind(e),
+      getContents: e.getContents.bind(e),
       getSelection: e.getSelection.bind(e),
-      getBounds:    e.getBounds.bind(e),
+      getBounds: e.getBounds.bind(e),
     };
   }
 
-  getEditingArea(): Element {
+  getEditingArea(): HTMLElement {
     if (!this.editingArea) {
       throw new Error('Instantiating on missing editing area');
     }
@@ -443,15 +441,15 @@ class ReactQuill extends React.Component<ReactQuillProps, ReactQuillState> {
     if (element.nodeType === 3) {
       throw new Error('Editing area cannot be a text node');
     }
-    return element as Element;
+    return element as HTMLElement;
   }
 
   /*
   Renders an editor area, unless it has been provided one to clone.
   */
   renderEditingArea(): JSX.Element {
-    const {children, preserveWhitespace} = this.props;
-    const {generation} = this.state;
+    const { children, preserveWhitespace } = this.props;
+    const { generation } = this.state;
 
     const properties = {
       key: generation,
@@ -468,8 +466,8 @@ class ReactQuill extends React.Component<ReactQuillProps, ReactQuillState> {
     }
 
     return preserveWhitespace ?
-      <pre {...properties}/> :
-      <div {...properties}/>;
+      <pre {...properties} /> :
+      <div {...properties} />;
   }
 
   render() {
